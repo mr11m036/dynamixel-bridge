@@ -4,7 +4,7 @@
 *
 * Projekt : Proxy for the AX library
 * Copyright (C) <<COPYRIGHT>>
-*
+*t
 * Kurzbeschreibung: Beinhaltet die Funktionen zum Erzeugen und Traversieren
 *					eines Labyrinth.
 *
@@ -22,6 +22,19 @@
 
 #define DEBUG 1
 #define MAXARRAYSIZE 10 // Allow a maximum of 10 parameers
+
+// Macro for the selection of the Serial Port
+
+#define sendData(args)  (Serial.write(args))    // Write Over Serial
+#define availableData() (Serial.available())    // Check Serial Data Available
+#define readData()      (Serial.read())         // Read Serial Data
+#define peekData()      (Serial.peek())         // Peek Serial Data
+#define beginCom(args)  (Serial.begin(args))    // Begin Serial Comunication
+#define endCom()        (Serial.end())          // End Serial Comunication
+
+// Macro for Timing
+
+#define delayus(args) (delayMicroseconds(args))  // Delay Microseconds
 
 // Dynamixel Constants
 
@@ -135,8 +148,21 @@ typedef enum   {
   DECODE_LENGTH=4,
   DECODE_INSTRUCTION=5,
   DECODE_PARAMETERS=6,
-  DECODE_CHECKSUM=7
-} decodeStates; 
+  DECODE_CHECKSUM=7,
+  DECODE_SENDTOAX=8
+} decodeStateTX;               // ROS --> Arduino --> AX 
+
+
+typedef enum   {
+  ENCODE_INIT1=1,
+  ENCODE_INIT2=2,
+  ENCODE_COMMANDID=3,
+  ENCODE_LENGTH=4,
+  ENCODE_INSTRUCTION=5,
+  ENCODE_PARAMETERS=6,
+  ENCODE_CHECKSUM=7,
+  ENCODE_SENDTOAX=8
+} decodeStateRX;            // AX --> Arduino --> ROS
 
 /*--- Declarion of variables ---------------------------------------*/
 
@@ -154,8 +180,14 @@ byte bChecksumRecieved;
 byte bChecksumCalculated;
 // Decode states
 
-decodeStates currentState = DECODE_INIT1;
-decodeStates nextState    = DECODE_INIT1;
+decodeStateTX currentStateTX  = DECODE_INIT1;
+decodeStateTX nextStateTX     = DECODE_INIT1;
+
+decodeStateRX currentStateRX  = ENCODE_INIT1;
+decodeStateRX nextStateRX     = ENCODE_INIT1;
+
+
+boolean stateAXRexiveIsRunning = false; // True if response from AX is expected
 
 
 
@@ -220,88 +252,100 @@ void loop(){
 //  autoSearch();
   //Dynamixel.turn(254,RIGTH,512); // Gira el servo a la Derecha a maxima velocidad
 
+//
+ if (stateAXRexiveIsRunning != true) {
+     runStateMachineTX();
+ } else {
+     runStateMachineRX();
+ }
+   
+     
+     
+     
+ }
+
+int runStateMachineRX () {
+}
+
+int runStateMachineTX () {
 // ---------- Command Statemachine for Dynamixel Commands -------------
 
-switch (currentState) {
+switch (currentStateTX ) {
   case DECODE_INIT1:
-
        
-      
         if (getStartByte() == DXL_INITSEQ) {
                    #ifdef DEBUG
         Serial.print("*** State: ");
-        Serial.println(currentState);
+        Serial.println(currentStateTX);
         #endif
-          nextState = DECODE_INIT2;   // Wait for the second init sequence byte 0xFF.
+          nextStateTX = DECODE_INIT2;   // Wait for the second init sequence byte 0xFF.
         } else
         {
-          nextState = DECODE_INIT1;  // Stay in the same state an wait for a new message.
+          nextStateTX = DECODE_INIT1;  // Stay in the same state an wait for a new message.
         }
        
   break;
   
   case DECODE_INIT2:
-
-        
+       
         if (getStartByte() == DXL_INITSEQ) {
         #ifdef DEBUG
         Serial.print("*** State: ");
-        Serial.println(currentState);
+        Serial.println(currentStateTX);
         #endif
-          nextState = DECODE_COMMANDID;   // Wait for the second init sequence byte 0xFF.
+          nextStateTX = DECODE_COMMANDID;   // Wait for the second init sequence byte 0xFF.
         } else
         {
-          nextState = DECODE_INIT1;  // Stay in the same state an wait for a new message.
+          nextStateTX = DECODE_INIT1;  // Stay in the same state an wait for a new message.
         }
        
   break;
   
   case DECODE_COMMANDID:
- 
-                
+                 
         nextCommand = getCommandByte();
         if (nextCommand != 0) {
           #ifdef DEBUG
           Serial.print("*** State: ");
-          Serial.println(currentState);
+          Serial.println(currentStateTX);
           #endif
           bServoID = nextCommand;
-          nextState = DECODE_LENGTH;   
+          nextStateTX = DECODE_LENGTH;   
         } else
         {
-          nextState = DECODE_INIT1;  // Stay in the same state an wait for a new message.
+          nextStateTX = DECODE_INIT1;  // Stay in the same state an wait for a new message.
         }
   break;
   
   case DECODE_LENGTH:
          #ifdef DEBUG
         Serial.print("*** State: ");
-        Serial.println(currentState);
+        Serial.println(currentStateTX);
         #endif
         
         nextCommand = getCommandByte();
         if (nextCommand != 0) {                // Has to be at least 2
           bInstructionLength = nextCommand;
-          nextState = DECODE_INSTRUCTION;   
+          nextStateTX = DECODE_INSTRUCTION;   
         } else
         {
-          nextState = DECODE_INIT1;  // Stay in the same state an wait for a new message.
+          nextStateTX = DECODE_INIT1;  // Stay in the same state an wait for a new message.
         } 
   break;
   
   case DECODE_INSTRUCTION:
          #ifdef DEBUG
         Serial.print("*** State: ");
-        Serial.println(currentState);
+        Serial.println(currentStateTX);
         #endif
         
         nextCommand = getCommandByte();
         if (nextCommand != 0) {
           bInstruction = nextCommand;
-          nextState = DECODE_PARAMETERS;   
+          nextStateTX = DECODE_PARAMETERS;   
         } else
         {
-          nextState = DECODE_INIT1;  // Stay in the same state an wait for a new message.
+          nextStateTX = DECODE_INIT1;  // Stay in the same state an wait for a new message.
         } 
         
    break;
@@ -310,7 +354,7 @@ switch (currentState) {
     
         #ifdef DEBUG
         Serial.print("*** State: ");
-        Serial.println(currentState);
+        Serial.println(currentStateTX);
         #endif
         
         // Get N Parameters 
@@ -321,13 +365,13 @@ switch (currentState) {
         bArrayPARAM[i] = nextCommand;
         }
 
-        nextState = DECODE_CHECKSUM;   
+        nextStateTX = DECODE_CHECKSUM;   
   break;
   
   case DECODE_CHECKSUM:
-                  #ifdef DEBUG
+        #ifdef DEBUG
         Serial.print("*** State: ");
-        Serial.println(currentState);      
+        Serial.println(currentStateTX);      
         Serial.print("*** ID: ");
         Serial.println(bServoID);
         Serial.print("*** LEN: ");
@@ -346,24 +390,71 @@ switch (currentState) {
           
           if (bChecksumRecieved == bChecksumCalculated) {
           // Send Command to Servo
-              nextState = DECODE_INIT1; 
-
+              nextStateTX = DECODE_SENDTOAX; 
+            
           } else {
            // Discard command
-           nextState = DECODE_INIT1; 
+           nextStateTX = DECODE_SENDTOAX;  // TODO: Change to DECODE_INIT1 when checksum is calculated correctly. 
           
         }
          
+  break;
+  
+  case DECODE_SENDTOAX:
+       
+       sendToAXServo();
+       stateAXRexiveIsRunning = true;
+       nextStateTX = DECODE_INIT1;
   break;
   
   default:
   break;
 }
 
-currentState = nextState;
- 
- }
+currentStateTX  = nextStateTX;
 
+}
+
+byte sendToAXServo () {
+ 
+ switch (bInstruction) {
+
+   case DXL_PING:
+       Error = Dynamixel.ping(bServoID);
+       sendData(255);
+       sendData(255);
+       sendData(13);
+       sendData(2);
+       sendData(0);
+     
+   break;
+   
+   case DXL_READ_DATA:
+   break;
+   
+   case DXL_WRITE_DATA:
+   break;
+   
+   case DXL_REG_WRITE:
+   break;
+   
+   case DXL_ACTION:
+   break;
+   
+   case DXL_RESET:
+   break;
+   
+   case DXL_SYNC_WRITE :
+   break;
+   
+   default:
+
+   break;
+   
+ }
+ 
+ 
+}
 
 byte getStartByte () {
   byte returnCommand;
@@ -395,7 +486,7 @@ byte calculateChecksum () {
    parameterSum = bArrayPARAM[j];
  }
 
-  returnChecksum =~  (bServoID + bInstructionLength + parameterSum);
+  returnChecksum =  (~(bServoID + bInstructionLength + parameterSum))&0xFF;
   return returnChecksum;
 }
 
