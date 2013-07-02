@@ -33,6 +33,8 @@ const long  timerUnit = 40000; // Equals 20 Milliseconds -> Doule the Amount of 
 const int   lowerBoundry = 650; // Equals -40 degree down
 const int   upperBoundry = 374;
 
+float haltPostion=512;
+
 ros::NodeHandle  nh;
 std_msgs::String str_msg;
 std_msgs::Float32 int_msg;
@@ -45,17 +47,23 @@ String tempStr;
 boolean startScan = false;
 
 void axScan( const std_msgs::Bool& bool_msg){
- startScan = bool_msg.data;  // blink the led
+  startScan = bool_msg.data; // Set scan status.
 }
 
-ros::Publisher axservo("axservo", &int_msg);
-ros::Subscriber<std_msgs::Bool> sub("ax_scan", &axScan );
+void axPosition (const std_msgs::Float32& position_msg){
+  haltPostion = (((position_msg.data * 4068) / 71)+150)/degUnit;
+}
+
+ros::Publisher axservo("dynamixel/pose", &int_msg);
+ros::Subscriber<std_msgs::Bool> subTilt("dynamixel/tiltscan", &axScan );
+ros::Subscriber<std_msgs::Float32> subPostion("dynamixel/goposition", &axPosition );
 
 void setup()
 {
   nh.initNode();
   nh.advertise(axservo);
-  nh.subscribe(sub);
+  nh.subscribe(subTilt);
+  nh.subscribe(subPostion);
   Dynamixel.begin(1000000,2);
   Dynamixel.setEndless(13,OFF); 
   Dynamixel.moveSpeedRW(13,512,30);
@@ -76,7 +84,7 @@ void loop()
   
 
   
-  if (!((((((Position*degUnit)-150) * 71) / 4068) < 1) && (((((Position*degUnit)-150) * 71) / 4068) > -1))) 
+  if (!((((((Position*degUnit)-150) * 71) / 4068) < 1) && (((((Position*degUnit)-150) * 71) / 4068) > -1))) // Convert from rad to degree and filter out glitches.
   {
      Position = Dynamixel.readPosition(13); 
   } else
@@ -84,7 +92,8 @@ void loop()
       // Convert Postion data into rad and put it into the datafield of the message
       int_msg.data = (((Position*degUnit)-150) * 71) / 4068; 
       axservo.publish( &int_msg );
-      runScanStatemachine(lowerBoundry, upperBoundry, 10, Position, startScan);
+      runScanStatemachine(lowerBoundry, upperBoundry, 10, Position, startScan, haltPostion);
+
   }
   
 
@@ -106,9 +115,12 @@ void loop()
 
 }
 
+void goToPosition(float fgoalPostion) {
+   Dynamixel.moveSpeed(13,fgoalPostion,50);
+}
 
 // ---------- Command Statemachine for Dynamixel Commands -------------
-void runScanStatemachine (long maxUP, long maxDown, int maxDelta, float fPosition, boolean bstartScan) {
+void runScanStatemachine (long maxUP, long maxDown, int maxDelta, float fPosition, boolean bstartScan, float fhaltPosition) {
 
 
 switch (currentScanState) {
@@ -186,6 +198,7 @@ switch (currentScanState) {
     case SCAN_STOP:
              if (bstartScan == false) {
               nextScanState = SCAN_STOP;
+              Dynamixel.moveSpeed(13,fhaltPosition,50);
         }
         else {
          nextScanState = backUPState;
